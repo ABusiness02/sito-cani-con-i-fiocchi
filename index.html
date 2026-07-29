@@ -113,7 +113,7 @@
     </div>
     <div id="heromedia" style="display: grid; grid-template-columns: 1.25fr .75fr; gap: 12px; animation: fiocchiUp .8s ease both;">
       <div style="position: relative; aspect-ratio: 3/4; border-radius: 3px; overflow: hidden; background: #16150F;">
-        <video src="media/toelettatura.mp4" autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" preload="auto" disablepictureinpicture="disablepictureinpicture" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block;"></video>
+        <video src="media/toelettatura.mp4" poster="media/poster-hero.jpg" autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" preload="auto" disablepictureinpicture="disablepictureinpicture" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block;"></video>
       </div>
       <div style="display: grid; gap: 12px;">
         <img src="media/salone.jpg" alt="Il salone di Cani con i Fiocchi" style="aspect-ratio: 1/1; width: 100%; border-radius: 3px; object-fit: cover; object-position: 50% 62%; display: block;">
@@ -149,7 +149,7 @@
       </div>
       <div style="display: flex; justify-content: center;">
         <div style="position: relative; width: 100%; max-width: 360px; aspect-ratio: 9/16; background: #16150F; border-radius: 4px; overflow: hidden; box-shadow: 0 18px 42px -22px rgba(43,39,33,.45);">
-          <video src="media/come-li-trattiamo.mp4" autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" preload="auto" disablepictureinpicture="disablepictureinpicture" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;"></video>
+          <video src="media/come-li-trattiamo.mp4" poster="media/poster-cura.jpg" autoplay="autoplay" muted="muted" loop="loop" playsinline="playsinline" preload="auto" disablepictureinpicture="disablepictureinpicture" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;"></video>
         </div>
       </div>
     </div>
@@ -386,9 +386,10 @@ class Component extends DCLogic {
       if (v.dataset.watched) return;
       v.dataset.watched = '1';
       this._vio.observe(v);
-      ['stalled', 'error', 'suspend'].forEach((ev) => v.addEventListener(ev, () => {
-        setTimeout(() => { if (v.paused && v.dataset.visible !== '0') { try { v.load(); v.muted = true; const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} } }, 800);
-      }));
+      v.addEventListener('error', () => { v.dataset.gaveUp = '1'; });
+      v.addEventListener('stalled', () => {
+        setTimeout(() => { if (v.paused && !v.error && !v.dataset.gaveUp) { try { this.fixVideo(v, false); } catch (e) {} } }, 1200);
+      });
     });
     watch();
     setTimeout(watch, 1000);
@@ -397,12 +398,21 @@ class Component extends DCLogic {
         const r = v.getBoundingClientRect();
         const visible = r.bottom > 0 && r.top < window.innerHeight;
         if (!visible) return;
+        if (v.error) { v.dataset.gaveUp = '1'; return; }
+        if (v.dataset.gaveUp) return;
+        if (v.readyState >= 3) { v.dataset.tries = '0'; delete v.dataset.gaveUp; }
+        if (v.readyState < 3) return;
         const last = parseFloat(v.dataset.lastT || '-1');
         const stuck = !v.paused && Math.abs(v.currentTime - last) < 0.05;
         v.dataset.lastT = String(v.currentTime);
-        if (v.paused || stuck || v.readyState < 2) {
-          try { this.fixVideo(v, stuck || v.readyState < 2); } catch (e) {}
-        }
+        if (!v.paused && !stuck) return;
+        const tries = parseInt(v.dataset.tries || '0', 10) + 1;
+        v.dataset.tries = String(tries);
+        if (tries > 3) { v.dataset.gaveUp = '1'; return; }
+        try {
+          v.muted = true; v.volume = 0;
+          const p = v.play(); if (p && p.catch) p.catch(() => {});
+        } catch (e) {}
       });
     }, 3000);
   }
@@ -413,6 +423,7 @@ class Component extends DCLogic {
   }
 
   fixVideo(v, reload) {
+    if (v.error || v.dataset.gaveUp) return;
     const s = v.getAttribute('src') || '';
     if (s.indexOf('data:') === 0) {
       let url = v.dataset.bloburl;
